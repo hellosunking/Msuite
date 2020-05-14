@@ -1,0 +1,39 @@
+This directory contains all the files needed to reproduce the simulation
+result present in our paper.
+
+Note that you need to add Msuite, Bismark and BWA-meth to your PATH, build
+the indices for them (human hg38), and update the file locations in the scripts
+before running them.
+
+1. Generate reads and run the software
+
+We have prepared "do.simu.PE.sh" and "do.simu.SE.sh" for this step. You can
+give it a parameter to specify the read size (default: 36). Note that you should
+run one of them, then check the results before running another.
+
+2. Check results
+
+We have prepared "check.result.sh" to extract the results of the analysis, including
+running time, mapping efficiency and accuracy. This program accepts two parameters:
+sequencing-mode (PE or SE) and read length. The results will be written into several
+files ends with ".stat".
+
+3. Example procedure
+
+user@linux$ sh ./do.simu.PE.sh 36
+user@linux$ sh check.result.sh PE 36
+user@linux$ sh ./do.simu.PE.sh 100
+user@linux$ sh check.result.sh PE 100
+user@linux$ sh ./do.simu.SE.sh 36
+user@linux$ sh check.result.sh SE 36
+user@linux$ sh ./do.simu.SE.sh 100
+user@linux$ sh check.result.sh SE 100
+
+4. CT/GA rich regions
+
+We have prepared "do.simu.CT.rich.sh" to simulate the perfomance on reads generated
+from CT/GA-rich regions (>=80%). Note that we have fixed CG methylation to 50%, read
+size to 36 bp and included result check in this program.
+
+The CT/GA rich regions are mined using "find.CT.rich.regions.sh".
+

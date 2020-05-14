@@ -1,0 +1,11 @@
+v1.0.3
+Change: I/O of preprocesser programs are optimized
+Add feature: Support for Nextera and BGI library preparation kits (now Msuite could handle ATAC-me data directly)
+
+v1.0.2
+Change: timestamp format
+Add feature: align-only mode
+
+v1.0.1
+Add feature: multiple-file support
+

@@ -1,0 +1,569 @@
+#!/usr/bin/perl
+#
+# Author : Kun Sun (sunkun@szbl.ac.cn)
+# Date   : Apr 2020
+# Version: 1.0.3
+#
+# This is the main program of Msuite.
+# It will interpret the parameters, prepare data and write makefile.
+#
+# Msuite is freely available at https://github.com/hellosunking/Msuite/
+#
+
+use strict;
+use warnings;
+use Getopt::Long;
+use Cwd;
+use File::Basename;
+use FindBin qw/$Bin/;
+use lib $Bin;
+
+our $ver   = "1.0.3 (Apr 2020)";
+
+## running environment
+my $cwd    = cwd();
+my $prg    = $0;
+$prg       = "$cwd/$prg" unless $prg=~/^\//;
+my $Msuite = dirname( $prg );
+$Msuite    =~ s/\/\.$//;
+my $bin    = "$Msuite/bin";
+
+## parameters
+### TODO: add --no-rmdup support
+our $pe    = '';
+our $help  = 0;
+our $version = 0;
+our ($read1, $cycle, $index, $outdir) = ( '', 0, '', '' );
+our ($read2, $mode3, $mode4, $protocol, $kit,       $thread, $phred33, $phred64, $minscore, $minins, $maxins, $minsize, $no_rmdup) =
+    ('',     0,      0,      'BS',      'illumina', 0,       0,        0,        20,        0,       1000,    22      , 0        );
+my $readU = '';
+my $alignmode;
+my $alignonly = 0;
+
+GetOptions(
+	"1:s"  => \$read1,
+	"x:s"  => \$index,
+	"o:s"  => \$outdir,
+	"c:i"  => \$cycle,
+	"U:s"  => \$readU,
+
+	"2:s"  => \$read2,
+	"3"    => \$mode3,
+	"4"    => \$mode4,
+	"m:s"  => \$protocol,
+	"k:s"  => \$kit,
+	"p:i"  => \$thread,
+	"q:i"  => \$minscore,
+	"phred33"  => \$phred33,
+	"phred64"  => \$phred64,
+	"minins:i" => \$minins,
+	"maxins:i" => \$maxins,
+	"minsize:i"=> \$minsize,
+
+	"align-only"=> \$alignonly,
+#	"no-rmdup" => \$no_rmdup,
+
+	"help|h"    => \$help,
+	"version|v" => \$version
+);
+
+if( $help ) {
+	usage( $prg );
+	exit 0;
+}
+
+if( $version ) {
+	print "$ver\n";
+	exit 0;
+}
+
+## check parameters
+if( check_parameters() ) {
+	usage( $prg );
+	exit 10;
+}
+
+## check whether the index is valid or not
+unless( -s "$Msuite/index/$index/chr.info" ) {
+	printRed( "Fatal error: The index you specified ($index) is invalid!\n" .
+				"Please refer to README file for how to add indice to Msuite." );
+	exit 11;
+}
+
+## check dependent programs
+my ( $bowtie2, $samtools, $R ) = check_dependent_programs();
+
+print "\nINFO: Use Msuite root directory '$Msuite'.\n";
+
+#################################################################################
+## prepare directories
+$outdir = "$cwd/$outdir" unless $outdir =~ /^\//;
+#$read1 = "$cwd/$read1"  unless $read1  =~ /^\//;
+#$read2 = "$cwd/$read2"  unless $read2  =~ /^\//;
+
+prepare_directories();
+if( $phred33 ) {
+	$minscore += 33;
+} else {
+	$minscore += 64;
+}
+
+# prepare makefile
+my @tasks;
+my $makefile = '';
+
+# step 1: fastq trimming and alignment
+my $Bowtie2Parameter = "-q --score-min L,0,-0.2 --ignore-quals --no-unal --no-head -p $thread --sam-no-qname-trunc";
+my $PEdataParameter  = "--dovetail --minins $minins --maxins $maxins --no-mixed --no-discordant";
+my $Mode4IndexCG2TG  = "$Msuite/index/$index/Mode4/CG2TG";
+my $Mode4IndexCG2CA  = "$Msuite/index/$index/Mode4/CG2CA";
+my $Mode3IndexC2T    = "$Msuite/index/$index/Mode3/C2T";
+my $Mode3IndexG2A    = "$Msuite/index/$index/Mode3/G2A";
+my $RawGenome        = "$Msuite/index/$index/genome.fa";
+my $chrinfo          = "$Msuite/index/$index/chr.info";
+
+my $thread_lim = $thread;
+$thread_lim = 8 if $thread_lim > 8;	## limit the preprocessing programs to at most 8 threads due to I/O consideration
+
+if( $pe ) {	# paired-end data
+	$read1 =~ s/,+$//;
+	$read1 =~ s/^,+//;
+	$read2 =~ s/,+$//;
+	$read2 =~ s/^,+//;
+	my @file1s = split /,+/, $read1;
+	my @file2s = split /,+/, $read2;
+
+	if( $#file1s<0 || $#file2s<0 ) {
+		printRed( "Fatal error: Read1 or Read2 does not contain any valid files!" );
+		exit 10;
+	}
+	if( $#file1s != $#file2s ) {
+		printRed( "Fatal error: Read1 and Read2 do not contain the same amount of files!\n" );
+		exit 11;
+	}
+
+	for( my $i=0; $i<=$#file1s; ++$i ) {
+		$file1s[$i] = "$cwd/$file1s[$i]" unless $file1s[$i] =~ /^\//;
+		$file2s[$i] = "$cwd/$file2s[$i]" unless $file2s[$i] =~ /^\//;
+	}
+	$read1 = join( ",", @file1s );
+	$read2 = join( ",", @file2s );
+	my $read1space = join( " ", @file1s );
+	my $read2space = join( " ", @file2s );
+	print "INFO: ", $#file1s+1, " paired files are specified as input in Paired-End mode.\n";
+	$makefile .= "Msuite.trim.log: $read1space $read2space #-@ $thread_lim\n" .
+	"\t$bin/preprocessor.pe $read1 $read2 $cycle Msuite $alignmode $thread_lim $minsize $minscore $kit\n\n";
+
+	if( $alignmode == 4 ) {
+		$makefile .= "Msuite.CG2TG.sam: Msuite.trim.log #-@ $thread\n" .
+					 "\t$bowtie2 $Bowtie2Parameter --norc -x $Mode4IndexCG2TG $PEdataParameter " .
+					 "-1 Msuite.R1.fq -2 Msuite.R2.fq -S Msuite.CG2TG.sam 2>Msuite.CG2TG.log\n".
+					 "Msuite.CG2CA.sam: Msuite.trim.log #-@ $thread\n" .
+					 "\t$bowtie2 $Bowtie2Parameter --nofw -x $Mode4IndexCG2CA $PEdataParameter " .
+					 "-1 Msuite.R1.fq -2 Msuite.R2.fq -S Msuite.CG2CA.sam 2>Msuite.CG2CA.log\n".
+					 "Msuite.merge.log: Msuite.CG2TG.sam Msuite.CG2CA.sam #-@ $thread_lim\n" .
+					 "\t$bin/bowtie2.processer.pe Msuite.CG2TG.sam Msuite.CG2CA.sam Msuite.trim.log Msuite.merged.sam $thread_lim >Msuite.merge.log\n\n";
+	} else {	## mode 3
+		$makefile .= "Msuite.C2T.sam: Msuite.trim.log #-@ $thread\n" .
+					 "\t$bowtie2 $Bowtie2Parameter --norc -x $Mode3IndexC2T $PEdataParameter " .
+					 "-1 Msuite.R1.fq -2 Msuite.R2.fq -S Msuite.C2T.sam 2>Msuite.C2T.log\n" .
+					 "Msuite.G2A.sam: Msuite.trim.log #-@ $thread\n" .
+					 "\t$bowtie2 $Bowtie2Parameter --nofw -x $Mode3IndexG2A $PEdataParameter " .
+					 "-1 Msuite.R1.fq -2 Msuite.R2.fq -S Msuite.G2A.sam 2>Msuite.G2A.log\n" .
+					 "Msuite.merge.log: Msuite.C2T.sam Msuite.G2A.sam #-@ $thread_lim\n" .
+					 "\t$bin/bowtie2.processer.pe Msuite.C2T.sam Msuite.G2A.sam Msuite.trim.log Msuite.merged.sam $thread_lim >Msuite.merge.log\n\n";
+	}
+} else {	# single-end data
+	$read1 =~ s/,+$//;
+	$read1 =~ s/^,+//;
+	my @file1s = split /,+/, $read1;
+	for( my $i=0; $i<=$#file1s; ++$i ) {
+		$file1s[$i] = "$cwd/$file1s[$i]" unless $file1s[$i] =~ /^\//;
+	}
+	$read1 = join(",", @file1s);
+	my $read1space = join( " ", @file1s );
+	if( $#file1s == 0 ) {	## only 1 file
+		print "INFO: 1 file is specified as input in Single-End mode.\n";
+		$makefile .= "Msuite.trim.log: $read1 #-@ $thread_lim\n" .
+		"\t$bin/preprocessor.se $read1 null $cycle Msuite $alignmode $thread_lim $minsize $minscore $kit\n\n";
+	} else {	## there are multiple files
+		print "INFO: ", $#file1s+1, " files are specified as input in Single-End mode.\n";
+		$makefile .= "Msuite.trim.log: $read1space #-@ $thread_lim\n\tcat " . join( " ", @file1s ) . " | " .
+		"$bin/preprocessor.se /dev/stdin null $cycle Msuite $alignmode $thread_lim $minsize $minscore\n\n";
+	}
+
+	if( $alignmode == 4 ) {
+		$makefile .= "Msuite.CG2TG.sam: Msuite.trim.log\n" .
+					 "\t$bowtie2 $Bowtie2Parameter --norc -x $Mode4IndexCG2TG " .
+					 "-U Msuite.R1.fq -S Msuite.CG2TG.sam 2>Msuite.CG2TG.log\n" .
+					 "Msuite.CG2CA.sam: Msuite.trim.log\n" .
+					 "\t$bowtie2 $Bowtie2Parameter --nofw -x $Mode4IndexCG2CA " .
+					 "-U Msuite.R1.fq -S Msuite.CG2CA.sam 2>Msuite.CG2CA.log\n" .
+					 "Msuite.merge.log: Msuite.CG2TG.sam Msuite.CG2CA.sam\n" .
+					 "\t$bin/bowtie2.processer.se Msuite.CG2TG.sam Msuite.CG2CA.sam Msuite.trim.log Msuite.merged.sam $thread_lim >Msuite.merge.log\n\n";
+	} else {	## mode 3
+		$makefile .= "Msuite.C2T.sam: Msuite.trim.log #-@ $thread\n" .
+					 "\t$bowtie2 $Bowtie2Parameter --norc -x $Mode3IndexC2T " .
+					 "-U Msuite.R1.fq -S Msuite.C2T.sam 2>Msuite.C2T.log\n" .
+					 "Msuite.G2A.sam: Msuite.trim.log #-@ $thread\n" .
+					 "\t$bowtie2 $Bowtie2Parameter --nofw -x $Mode3IndexG2A " .
+					 "-U Msuite.R1.fq -S Msuite.G2A.sam 2>Msuite.G2A.log\n" .
+					 "Msuite.merge.log: Msuite.C2T.sam Msuite.G2A.sam #-@ $thread_lim\n" .
+					 "\t$bin/bowtie2.processer.se Msuite.C2T.sam Msuite.G2A.sam Msuite.trim.log Msuite.merged.sam $thread_lim >Msuite.merge.log\n\n";
+	}
+}
+push @tasks, "Msuite.merge.log";
+
+# step 2: remove duplicate
+if( $pe ) {
+	$makefile .= "Msuite.rmdup.log: Msuite.merge.log\n" .
+				 "\t$bin/rmdup.pe $chrinfo Msuite.trim.log $maxins Msuite.merged.sam Msuite.rmdup\n" .
+				 "Msuite.rmdup.size.dist.pdf: Msuite.rmdup.log\n" .
+				 "\t$R --slave --args Msuite.rmdup.size.dist < $bin/plot.size.R\n";
+	push @tasks, "Msuite.rmdup.size.dist.pdf";
+} else {	## SE
+	$makefile .= "Msuite.rmdup.log: Msuite.merge.log\n" .
+				 "\t$bin/rmdup.se $chrinfo Msuite.trim.log Msuite.merged.sam Msuite.rmdup\n";
+	push @tasks, "Msuite.rmdup.log";
+}
+
+# step 3: convert sam to bam and build bam index
+$makefile .= "Msuite.rmdup.bam: Msuite.rmdup.log #-@ $thread\n".
+			 "\tperl $bin/generate.header.pl $chrinfo $index $protocol $alignmode $read1 $read2 | cat - Msuite.rmdup.sam | $samtools view -bS -@ $thread -o Msuite.rmdup.bam -\n";
+if( $pe ) {	## fixmate for PE data
+	$makefile .= "Msuite.nsort.bam: Msuite.rmdup.bam #-@ $thread\n" .
+				 "\t$samtools sort -n -@ $thread Msuite.rmdup.bam -o Msuite.nsort.bam\n" .
+				 "Msuite.fixmate.bam: Msuite.nsort.bam #-@ $thread\n" .
+				 "\t$samtools fixmate -@ $thread Msuite.nsort.bam Msuite.fixmate.bam\n" .
+				 "Msuite.final.bam: Msuite.fixmate.bam #-@ $thread\n" .
+				 "\t$samtools sort -@ $thread Msuite.fixmate.bam -o Msuite.final.bam\n".
+				 "Msuite.final.bam.bai: Msuite.final.bam\n" .
+				 "\t$samtools index Msuite.final.bam && rm -f Msuite.nsort.bam Msuite.fixmate.bam\n\n";
+} else {
+	$makefile .= "Msuite.final.bam: Msuite.rmdup.bam #-@ $thread\n" .
+				 "\t$samtools sort -@ $thread Msuite.rmdup.bam -o Msuite.final.bam\n".
+				 "Msuite.final.bam.bai: Msuite.final.bam\n" .
+				 "\t$samtools index Msuite.final.bam\n\n";
+}
+push @tasks, "Msuite.final.bam.bai";
+
+# step 4: fastq statistics and base composition plot
+$makefile .= "R1.fqstat.pdf: Msuite.trim.log\n" .
+			 "\t$R --slave --args R1.fqstat < $bin/plot.fqstatistics.R\n";
+push @tasks, "R1.fqstat.pdf";
+if( $pe ) {
+$makefile .= "R2.fqstat.pdf: Msuite.trim.log\n" .
+			 "\t$R --slave --args R2.fqstat < $bin/plot.fqstatistics.R\n";
+push @tasks, "R2.fqstat.pdf";
+}
+$makefile .= "\n";
+
+unless( $alignonly ) {
+	# step 5: methyaltion call
+	if( $pe ) {
+		$makefile .= "Msuite.meth.call: Msuite.rmdup.sam\n".
+					 "\t$bin/meth.caller PE $RawGenome Msuite.rmdup.sam $protocol Msuite\n";
+	} else  {
+		$makefile .= "Msuite.meth.call: Msuite.rmdup.sam\n".
+					 "\t$bin/meth.caller SE $RawGenome Msuite.rmdup.sam $protocol Msuite\n";
+	}
+	$makefile .= "DNAm.per.chr.pdf: Msuite.meth.call\n" .
+				 "\t$R --slave --args Msuite.meth.log $protocol DNAm.per.chr < $bin/plot.DNAm.per.chr.R\n\n";
+	push @tasks, "DNAm.per.chr.pdf";
+
+	## step 6: plot DNAm around TSS
+	my $TSS = "$Msuite/index/$index/tss.ext.bed";
+	$makefile .= "DNAm.around.TSS.stat: Msuite.meth.call\n" .
+				 "\tperl $bin/profile.DNAm.around.TSS.pl Msuite.meth.call $TSS $protocol > DNAm.around.TSS.stat\n" .
+				 "DNAm.around.TSS.pdf: DNAm.around.TSS.stat\n" .
+				 "\t$R --slave --args DNAm.around.TSS.stat DNAm.around.TSS < $bin/plot.DNAm.around.tss.R\n\n";
+#	push @tasks, "DNAm.around.TSS.pdf";
+} else {
+	printRed( "Warning: Align-only Mode is ON!" );
+}
+
+## step 7: generate final report
+my $report = join(" ", "Msuite.report/index.html:", @tasks);
+$report .= "\n\tmv $outdir/*png $outdir/*pdf $outdir/Msuite.report; perl $Msuite/bin/make.report.pl $outdir $alignonly\n\n";
+
+# write makefile
+open  MK, ">$outdir/makefile" or die("$!");
+print MK  $report, $makefile;
+print MK  "clean:\n\t\@if [ -s \"Msuite.report/index.html\" ];then rm -f *fq *sam Msuite.rmdup.bam;else echo \"Error: it seems that the analysis has not finished yet.\";fi\n\n";
+close MK;
+
+print "\nMakefile successfully generated.\n",
+	  "Now you can go to '$outdir' and run 'make' to perform the analysis.\n\n";
+
+#################################### subroutines ###########################################
+# prepare directories
+sub prepare_directories {
+	if( -d $outdir ) {
+		printRed( "WARNING: output directory '$outdir' EXISTS!" );
+	} elsif( -s $outdir ) {
+		printRed( "FATAL ERROR: output directory '$outdir' EXISTS and it is a FILE!" );
+		exit 100;
+	} else {
+		system "mkdir -p $outdir/Msuite.report/";
+	}
+
+	## write configuration file
+	open OUT, ">$outdir/Msuite.conf" or die("$!");
+	if( $pe ) {
+		print OUT "Sequencing files\t$read1:$read2\n",
+				"Sequencing mode\tPaired-end\n";
+	} else {
+		print OUT "Sequencing files\t$read1\n",
+				"Sequencing mode\tSingle-end\n";
+	}
+	print OUT "Sequencing cycle\t$cycle\n",
+			  "Library protocol\t$protocol\n",
+			  "Genome index\t$index\n",
+			  "Alignment mode\t$alignmode-letter\n";
+
+	if( $phred33 ) {
+		print OUT "Quality score base\tPhred33\n";
+	} else {
+		print OUT "Quality score base\tPhred64\n";
+	}
+	print OUT "Minimum quality score\t$minscore\n",
+			  "Insert size range\t$minins-$maxins\n",
+			  "Align-only mode\t", ($alignonly)?'On':'Off', "\n",
+			  "Running thread\t$thread\n",
+			  "Output directory\t$outdir\n";
+	close OUT;
+}
+
+sub usage {
+	my $prg = shift || $0;
+	$prg =~ s/.*\///;
+
+	print <<END_OF_USAGE;
+
+########## Msuite: Multi-mode DNA methylation data analysis suite ##########
+
+Author : Kun Sun (sunkun\@szbl.ac.cn)
+Version: $ver
+
+\033[1;34mUsage: $prg [options] -x index -1/-U Read1.fq [ -2 Read2.fq ] -c cycle -o out.dir\033[0m
+
+Compulsory parameters:
+
+  -1/-U Read1.fq   Specify the path to the files containing read 1
+                   If your data is Paired-end, specify read 2 files using '-2' option
+                   Note that if -U is used, '-2' will be ignored no matter it's set or not
+
+                   If you have multiple files for your sample, please use ',' to separate them
+
+  -x index         Specify the genome index
+                   Please refer to README file on how to build index for Msuite
+
+  -c cycle         Specify the sequencing cycle of your data
+
+  -o out.dir       Specify the output directory
+                   Note that your specified directory will be created if it does not exist
+                   otherwise the files under that directory could get over-written
+
+
+Optional parameters:
+
+  -2 Read2.fq      Specify the path to the file containing read 2
+                   Use this parameter if your data is generated in paired-end mode
+
+                   If you have multiple files for your sample, please use ',' to separate them
+                   and make sure that all the files are well paired in '-1' and '-2' options
+
+  -3               Use 3-letter alignment (default)
+  -4               Use 4-letter alignment
+                   Note that the above two options are mutually exclusive
+
+  -m TAPS/BS       Specify the library protocol (default: BS)
+                   Note that only 'TAPS' and 'BS' are acceptable
+
+  -k kit           Specify the library preparation kit (default: illumina)
+                   Note that only 'illumina', 'nextera' and 'bgi' are acceptable
+
+  -p threads       Specify how many threads should be used (default: use all threads)
+
+  --phred33        Read cycle quality scores are in Phred33 format (default)
+  --phred64        Read cycle quality scores are in Phred64 format
+                   Note that the above two options are mutually exclusive
+
+  -q score         The minimum quality score to keep the cycle (default: 20)
+                   Note that 20 means 1% error rate, 30 means 0.1% error rate in Phred
+
+                   Sometimes quality scores start from 35 ('#') in the FASTQ files,
+                   in this case you could adjust '-q' option, e.g., '--phred33 -q 22'
+
+  --minsize size   Minimum read size to be kept for alignment (default: 22)
+
+  --minins MIN     Minimum insert size (default: 0)
+  --maxins MAX     Maximum insert size (default: 1000)
+                   Note that the above two options will be ignored for Single-End data
+
+  --align-only     Stop after alignment (i.e., do not perform DNA methylation call and
+                   visualization around TSS; default: not set)
+
+  -h/--help        Show this help information and quit
+  -v/--version     Show the software version and quit
+
+
+Please refer to README file for more information.
+
+END_OF_USAGE
+}
+
+sub check_parameters {
+	print "\n";
+
+	if( $readU ) {
+		if( $read1 ) {
+			printRed( "Error: Both -1 and -U are specified!" );
+			return 1;
+		}
+		$read1 = $readU;
+		if( $read2 ) {
+			printRed( "Warning: -U is specified then -2 will be IGNORED!" );
+			$read2 = '';
+		}
+	}
+
+	unless( $read1 && $index && $outdir && $cycle ) {
+		printRed( "Fatal error: Missing key parameters!" );
+		#print "R1: $read1\nIndex: $index\nOutDir: $outdir\nCycle: $cycle\n";
+		return 1;
+	}
+
+	if( $read2 ) {
+		$pe = 'PE';
+		print "INFO: The input reads will be processed in Paired-End mode.\n";
+	} else {
+		$pe = '';
+		print "INFO: The input reads will be processed in Single-End mode.\n";
+	}
+
+	if( $mode3 && $mode4 ) {
+		printRed( "Error: Both -3 and -4 are specified!" );
+		return 1;
+	} else {
+		if( $mode4 ) {
+			$alignmode = 4;
+		} else {	## default
+			$alignmode = 3;
+		}
+	}
+
+	if( $phred33 && $phred64 ) {
+		printRed( "Error: Both --phred33 and --phred64 are specified!" );
+		return 1;
+	} else {
+		if( $phred64 ) {
+			$phred64 = 1;
+			$phred33 = 0;
+		} else {	## default
+			$phred64 = 0;
+			$phred33 = 1;
+		}
+	}
+
+	$protocol = uc $protocol;
+	if( $protocol !~ /^TAPS$/i && $protocol !~ /^BS$/i ) {
+		printRed( "Error: Unacceptable library protocol parameter!" );
+		return 1;
+	} else {
+		if ( $protocol =~ /^BS$/i ) {	## for BS-seq, force to use 3-letter mode
+			print "INFO: The data is generated in BS-seq protocol.\n";
+			if( $alignmode == 4 ) {
+				$alignmode = 3;
+				print "INFO: For BS-seq data, only 3-letter mode is valid ('-4' option will be ignored).\n";
+			}
+		} else {
+			print "INFO: The data is generated in TAPS-like protocol.\n";
+		}
+	}
+
+	if( $kit =~ /^illumina$/i ) {
+		$kit = "illumina";
+	} elsif ( $kit =~ /^nextera$/i ) {
+		$kit = "nextera";
+	} elsif( $kit =~ /^bgi$/i ) {
+		$kit = "bgi";
+	} else {
+		printRed( "Error: Unacceptable library preparation kit parameter!" );
+		return 1;
+	}
+
+	if( $thread == 0 ) {
+		$thread = `grep processor /proc/cpuinfo | wc -l`;
+		chomp( $thread );
+	}
+
+	if( $minins>$maxins || $maxins==0 ) {
+		printRed( "Error: Unacceptable insert size range!" );
+		return 1;
+	}
+
+	return 0;
+}
+
+sub check_dependent_programs {
+	my $bowtie2 = `which bowtie2 2>/dev/null`;
+	chomp( $bowtie2 );
+	if( $bowtie2 ) {
+		my $info = `$bowtie2 --version`;
+		my $ver;
+		my @l = split /\n/, $info;
+		foreach ( @l ) {
+			if( /version (\S+)/ ) {
+				$ver = $1;
+				last;
+			}
+		}
+		$ver = "unknown" unless $ver;
+		print "INFO: bowtie2 (version $ver) found at '$bowtie2'.\n";
+	} else {
+		printRed( "Fatal error: could not locate 'bowtie2' in your path!" );
+	exit 20;
+	}
+
+	my $samtools = `which samtools 2>/dev/null`;
+	chomp( $samtools );
+	if( $samtools ) {
+		my $info = `$samtools 2>&1`;
+		my $ver;
+		my @l = split /\n/, $info;
+		foreach ( @l ) {
+			$ver = $1 if /^Version:\s(\S+)/;
+		}
+		$ver = "unknown" unless $ver;
+		print "INFO: samtools (version $ver) found at '$samtools'.\n";
+	} else {
+		printRed( "Fatal error: could not locate 'samtools' in your path!" );
+		exit 20;
+	}
+
+	my $R = `which R`;
+	chomp( $R );
+	if( $R ) {
+		my $info = `$R --version`;
+		my $ver;
+		my @l = split /\n/, $info;
+		foreach ( @l ) {
+			$ver = $1 if /version (\S+)/;
+		}
+		$ver = "unknown" unless $ver;
+		print "INFO: R (version $ver) found at '$R'.\n";
+
+	} else {
+		printRed( "Fatal error: could not locate 'R' in your path!" );
+		exit 20;
+	}
+
+	return ($bowtie2, $samtools, $R);
+}
+
+sub printRed {
+	my $info = shift;
+	print STDERR "\n\033[1;31m$info\033[0m\n\n";
+}
+
