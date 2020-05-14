@@ -69,7 +69,7 @@ fi
 echo -e "${BLUE}========== Performing analysis (4-letter mode) ==========${BG}"
 echo
 cd $PRG/testing_dataset/Msuite.Mode4
-#time make
+time make
 if [ $? != 0 ]
 then
 	echo -e "${RED}ERROR: analysis failed! Please check the run logs for more information.${BG}"
@@ -103,7 +103,6 @@ then
 fi
 cd ../../
 echo -e "${BLUE}========== Analysis finished (3-letter mode) ==========${BG}"
-echo
 echo
 echo
 

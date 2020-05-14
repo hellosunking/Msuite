@@ -29,13 +29,13 @@ replace the copy in the "bin/" directory.
 
 2. How to run Mviewer
 
-The main program is "Mviewer". You can add the path to Mviewer to your ".bashrc" file under the "PATH"
+The main program is "mviewer". You can add the path to Mviewer to your ".bashrc" file under the "PATH"
 variable to call it from anywhere, or you can run the following command to add it to your current session:
 
    user@linux$ PATH=$PATH:$PWD
 
 
-Call "Mviewer" without any parameters to see the usage (or use '-h' option):
+Call "mviewer" without any parameters to see the usage (or use '-h' option):
 
 
 Mviewer: a component of the Msuite package for visualization of DNA methylation data
@@ -101,7 +101,7 @@ For example, if your file is "/path/to/Maligner.bam" and your reference sequence
 to visualize a region chr7:129919950-129920150 (promoter of MEST gene) and want to write the results into
 "/path/to/result/" with default parameters, simply run:
 
-   user@linux$ Mviewer -f /path/to/Maligner.bam -r chr7:129919950-129920150 \
+   user@linux$ mviewer -f /path/to/Maligner.bam -r chr7:129919950-129920150 \
 							-g /path/to/hg18.chr7.fa -o /path/to/result/
 
 
