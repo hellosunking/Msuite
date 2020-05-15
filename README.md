@@ -45,9 +45,9 @@ Then, you can build the genome indices using the following command:
 user@linux$ build.index/build.index.sh GENOME.FA(or GENOME.DIR) REFSEQ.txt Genome.ID
 ```
 Note that this utility will automatically incorporate the Lambda genome to build the genome indices.
-`Gzip` or `Bzip2` compression of `GENOME.FA` and `REFSEQ.txt` are also supported, but the files must
-contain the corresponding suffix (i.e., `REFSEQ.txt.gz` for `Gzip` compressed and `REFSEQ.txt.bz2` for
-`Bzip2` compressed file). The `Genome.ID` is an identifier that you specified to name your genome and
+`gzip` or `bzip2` compression of `GENOME.FA` and `REFSEQ.txt` are also supported, but the files must
+contain the corresponding suffix (i.e., `REFSEQ.txt.gz` for `gzip` compressed and `REFSEQ.txt.bz2` for
+`bzip2` compressed file). The `Genome.ID` is an identifier that you specified to name your genome and
 the indices will be written to the `index` directory under the root of `Msuite`. You can add as many
 genomes to `Msuite` as you need.
 
@@ -57,7 +57,7 @@ to call it from anywhere, or you can run the following command to add it to your
 ```
 user@linux$ PATH=$PATH:$PWD
 ```
-Call `Msuite` without any parameters to see the usage (or use '-h' option):
+Call `msuite` without any parameters to see the usage (or use '-h' option):
 ```
 ########## Msuite: Multi-mode DNA methylation data analysis suite ##########
 
@@ -141,7 +141,7 @@ If your data is generated using TAPS protocol in 75 bp * 2 (paired-end) mode, an
 data to the hg38 reference genome in 4-letter mode, and you want to use 16 threads to speed-up the analysis,
 then you can run:
 ```
-user@linux$ Msuite -1 /path/to/read1.fq -2 /path/to/read2.fq -c 75 -x hg38 \
+user@linux$ msuite -1 /path/to/read1.fq -2 /path/to/read2.fq -c 75 -x hg38 \
                    -4 -m TAPS -p 16 -o /path/to/output/dir
 ```
 
@@ -150,7 +150,7 @@ If your data is generated using BS-seq protocol in 100 bp * 1 (single-end) mode,
 data to the mm10 reference genome (note that you MUST use 3-letter mode here), and you want to use 32 threads
 to speed-up the analysis, then you can run:
 ```
-user@linux$ Msuite -1 /path/to/read1.fq -c 100 -x mm10 \
+user@linux$ msuite -1 /path/to/read1.fq -c 100 -x mm10 \
                    -3 -m BS -p 32 -o /path/to/output/dir
 ```
 
@@ -159,31 +159,29 @@ If your data is generated using TAPS protocol in 75 bp * 2 (paired-end) mode, an
 you want to align your data to the hg19 reference genome in 4-letter mode, and you want to use 48 threads to
 speed-up the analysis, then you can run:
 ```
-user@linux$ Msuite -1 /path/to/lane1.read1.fq,/path/to/lane2.read1.fq,/path/to/lane3.read1.fq \
+user@linux$ msuite -1 /path/to/lane1.read1.fq,/path/to/lane2.read1.fq,/path/to/lane3.read1.fq \
                    -2 /path/to/lane1.read2.fq,/path/to/lane2.read2.fq,/path/to/lane3.read2.fq \
                    -c 75 -x hg19 -4 -m TAPS -p 48 -o /path/to/output/dir
 ```
-<br />
 `Msuite` will check the data and dependent programs then generate a `makefile` under `/path/to/output/dir`
 ('-o' option). Then you can go to `/path/to/output/dir` and run `make` to perform the analysis:
 ```
 user@linux$ cd /path/to/output/dir; make
 ```
-
 We have prepared a testing dataset under the `testing_dataset` directory. It contains *in silico* generated
 reads following the TAPS (TET-assisted pyridine borane sequencing) protocol using
 [SHERMAN](http://www.bioinformatics.babraham.ac.uk/projects/sherman/) software (key parameters: C-&gt;T
 conversion rate: 50% for CpG loci, C-&gt;T conversion rate in CpH sites: 0.5%, sequencing error rate: 0.1%).
-Note that the reads are restricted to CT/GA-rich regions (CT/GA proportion >=80%) to illustrate the advantage
-of 4-letter over 3-letter mode. We also have prepared a work shell to run `Msuite` on this dataset using
+Note that the reads are restricted to CT/GA-rich regions (CT/GA proportion >= 80%) to illustrate the advantage
+of 4-letter over 3-letter mode. We also have prepared a work shell to run `msuite` on this dataset using
 both 4- and 3-letter modes:
 ```
 user@linux$ ./run_testing_dataset.sh
 ```
 Note that this script will automatically build the indices for hg38 genome if you have not done this before.
 
-You can compare the performance of 3-letter and 4-letter alignments by inspecting the outputs, which will be
-written to `testing_dataset/Msuite.Mode3/` and `testing_dataset/Msuite.Mode4/`.
+You can compare the performance of 4- and 3-letter analysis by inspecting the outputs, which will be written
+into `testing_dataset/Msuite.Mode3/` and `testing_dataset/Msuite.Mode4/`.
 
 
 ## Outputs explanation
