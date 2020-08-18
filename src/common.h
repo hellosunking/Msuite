@@ -4,7 +4,7 @@
  * This header file records the constants used in Msuite
  *
  * Author: Kun Sun (sunkun@szbl.ac.cn)
- * Date  : Apr 2020
+ * Date  : Aug 2020
  *
  * */
 

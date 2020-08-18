@@ -2,14 +2,17 @@
 #include <fstream>
 #include <string>
 #include <sstream>
-#include <map>
-#include <set>
+//#include <map>
+//#include <set>
+#include <tr1/unordered_map>
+#include <tr1/unordered_set>
 #include <stdio.h>
 #include <stdlib.h>
 #include <memory.h>
 #include "util.h"
 
 using namespace std;
+using namespace std::tr1;
 
 /*
  * Author: Kun Sun (sunkun@szbl.ac.cn)
@@ -25,7 +28,7 @@ int main( int argc, char *argv[] ) {
 	}
 
 	// loading info file
-	map<string, map<uint64_t, fraghit> *> samRecord;
+	unordered_map<string, unordered_map<uint64_t, fraghit> *> samRecord;
 	string line, chr;
 	stringstream ss;
 	ifstream fin( argv[1] );
@@ -43,7 +46,7 @@ int main( int argc, char *argv[] ) {
 		ss.clear();
 		ss >> chr;
 //		cerr << "Adding " << chr << " ...\n";
-		samRecord.insert( pair<string, map<uint64_t, fraghit>*>(chr, new map<uint64_t, fraghit>()) );
+		samRecord.insert( pair<string, unordered_map<uint64_t, fraghit>*>(chr, new unordered_map<uint64_t, fraghit>()) );
 	}
 	fin.close();
 
@@ -58,13 +61,13 @@ int main( int argc, char *argv[] ) {
 	fin.close();
 	readNum = atoi( line.c_str() );
 //	cerr << "Read number: " << line << " => " << readNum << '\n';
-//
+
 	// load sam file
-	map<string, map<uint64_t, fraghit> *> :: iterator sam_it;
-	map<string, map<uint64_t, fraghit> *> :: iterator no_such_chr = samRecord.end();
-	set<unsigned int> dup;
-	set<unsigned int> discard;
-	map<uint64_t, fraghit> :: iterator hit_it;
+	unordered_map<string, unordered_map<uint64_t, fraghit> *> :: iterator sam_it;
+	unordered_map<string, unordered_map<uint64_t, fraghit> *> :: iterator no_such_chr = samRecord.end();
+	unordered_set<unsigned int> dup;
+	unordered_set<unsigned int> discard;
+	unordered_map<uint64_t, fraghit> :: iterator hit_it;
 	fraghit hit;
 
 	fin.open( argv[3] );
@@ -149,8 +152,8 @@ int main( int argc, char *argv[] ) {
 	fin.clear();
 	fin.seekg( ios_base::beg );
 	lineNum = 0;
-	set<unsigned int> :: iterator non_dup = dup.end();
-	set<unsigned int> :: iterator non_discard = discard.end();
+	unordered_set<unsigned int> :: iterator non_dup = dup.end();
+	unordered_set<unsigned int> :: iterator non_discard = discard.end();
 	unsigned int unique=0;
 	while( true ) {
 		getline( fin, line );
@@ -181,5 +184,4 @@ int main( int argc, char *argv[] ) {
 
 	return 0;
 }
-
 

@@ -2,12 +2,15 @@
 #
 # Author: Kun Sun (sunkun@szbl.ac.cn)
 # This program is part of Msuite.
-# Date: Dec 2019
+# Date: Aug 2020
 #
 
 use strict;
 use warnings;
 use File::Basename;
+use FindBin qw($Bin);
+use lib $Bin;
+use MsuiteVersion qw($version $ver);
 
 if( $#ARGV < 4 ) {
 	print STDERR "\nUsage: $0 <in.chr.info> <index> <protocol> <mode> <read1.fq> [read2.fq]\n\n";
@@ -16,7 +19,6 @@ if( $#ARGV < 4 ) {
 
 my $Msuite = dirname($0);
 $Msuite =~ s/bin\/?$/Msuite/;
-my $ver = '1.0.3';
 
 print "\@HD\tVN:1.0\tSO:coordinate\n";
 my %info;

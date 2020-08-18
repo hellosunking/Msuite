@@ -8,13 +8,14 @@
 use strict;
 use warnings;
 use File::Basename;
+use FindBin qw($Bin);
+use lib $Bin;
+use MsuiteVersion qw($version $ver);
 
 if( $#ARGV < 0 ) {
 	print STDERR "Usage: $0 <data.dir> [alignonly=0|1]\n";
 	exit 2;
 }
-
-my $ver = '1.0.3';
 
 my $dir = $ARGV[0];
 my @color = ( '#E8DAEF', '#D6EAF8' );
@@ -103,7 +104,6 @@ $line = <LOG>;	## Discard XXX
 $line =~ /(\d+)/;
 my $discard = $1;
 
-
 print "<table id=\"alignStat\" width=\"75%\">\n",
 		"<tr bgcolor=\"$color[0]\"><td width=\"70%\"><b>Total input reads</b></td>",
 		"<td width=\"30%\"><b>", digitalize($total), "</b></td></tr>\n",
@@ -132,7 +132,7 @@ print "</table>\n\n";
 unless( $alignonly ) {
 print "<h2>Methylation statistics</h2>\n";
 ## load meth.caller log
-open LOG, "$dir/Msuite.meth.log" or die( "$!" );
+open LOG, "$dir/Msuite.CpG.meth.log" or die( "$!" );
 my ($wC, $wT, $cC, $cT) = ( 0, 0, 0, 0 );
 my ( $cntL, $conversionL ) = ( 0, 'NA' );
 while( <LOG> ) {
@@ -179,26 +179,30 @@ print "<table id=\"methStat\" width=\"75%\">\n",
 print "<h2>Base composition in the sequenced reads</h2>\n<ul>\n",
 		"<li>Read 1</li><br /><img src=\"R1.fqstat.png\" alt=\"Base composition in read 1\"><br />\n";
 print "<li>Read 2</li><br /><img src=\"R2.fqstat.png\" alt=\"Base composition in read 2\"><br />\n" if $pe;
-print "</ul>\n";
+print "</ul>\n\n";
 
 if( $pe ) {
 	print "<h2>Fragment size distribution</h2>\n",
-			"<img src=\"Msuite.rmdup.size.dist.png\" alt=\"fragment size distribution\"><br />\n";
+			"<img src=\"Msuite.rmdup.size.dist.png\" alt=\"fragment size distribution\"><br />\n\n";
 }
 
 unless( $alignonly ) {
 print "<h2>Methylation level per chromosome</h2>\n",
-		"<img src=\"DNAm.per.chr.png\" alt=\"DNAm.per.chr\"><br />\n";
+		"<img src=\"DNAm.per.chr.png\" alt=\"DNAm.per.chr\"><br />\n\n";
 
 print "<h2>Methylation level around TSS</h2>\n",
-		"<img src=\"DNAm.around.TSS.png\" alt=\"Methylation level around TSS\"><br />\n";
+		"<img src=\"DNAm.around.TSS.png\" alt=\"Methylation level around TSS\"><br />\n\n";
+
+print "<h2>M-bias plot</h2>\n<ul>\n",
+		"<li>Read 1</li><br /><img src=\"Msuite.R1.mbias.png\" alt=\"M-bias in read 1\"><br />\n";
+print "<li>Read 2</li><br /><img src=\"Msuite.R2.mbias.png\" alt=\"M-bias in read 2\"><br />\n" if $pe;
+print "</ul>\n\n";	
 }
 
 print "<h2>Analysis Parameters</h2>\n",
 		"<table id=\"para\" width=\"80%\">\n",
 		"<tr bgcolor=\"#888888\"><td width=\"30%\"><b>Option</b></td><td width=\"70%\"><b>Value</b></td></tr>\n",
 		"$parameter</table>\n";
-
 
 ## HTML tail
 my ($sec, $min, $hour, $day, $mon, $year, $weekday, $yeardate, $savinglightday) = localtime();

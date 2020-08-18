@@ -1,11 +1,21 @@
-v1.0.3
-Change: I/O of preprocesser programs are optimized
-Add feature: Support for Nextera and BGI library preparation kits (now Msuite could handle ATAC-me data directly)
 
-v1.0.2
+v1.1.0 Aug 2020
+Change: default minimum read size is set to 20
+Change: re-write the TSS-plot program for much higher speed
+Change: optimize context column in meth.call file from C:G:X to XCGX
+Change: call methylation for both CpG and CpH sites
+Add feature: Support ".gz" files as input
+Add feature: Support '*' syntax in file names
+Add feature: M-bias plot
+
+v1.0.3 Apr 2020
+Change: I/O of preprocesser programs are optimized
+Add feature: Support Nextera and BGI library preparation kits (now Msuite could handle ATAC-me data directly)
+
+v1.0.2 Jan 2020
 Change: timestamp format
 Add feature: align-only mode
 
-v1.0.1
+v1.0.1 Dec 2019
 Add feature: multiple-file support
 

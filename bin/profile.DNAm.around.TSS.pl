@@ -62,6 +62,7 @@ foreach my $i ( sort {$a<=>$b} keys %wC ) {
 		$mC = $cC{$i}/($cC{$i}+$cT{$i})*100 if $cC{$i}+$cT{$i}!= 0;
 	}
 	print join("\t", $i, $mW, $mC), "\n";
+	print STDERR join("\t", $i, $wC{$i}, $wT{$i}, $cC{$i}, $cT{$i}), "\n";
 }
 
 

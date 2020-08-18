@@ -144,7 +144,7 @@ int main( int argc, char *argv[] ) {
 			// Mostly AS-scores are 0 or negative
 			for( unsigned int ii=start; ii!=end; ++ii ) {
 				p = R1[ii].c_str();
-                register int i;
+				register int i;
 				register int j = 0;
 				for( i=0; p[i]!=LINE_NUMBER_SEPARATOR; ++i ) {
 					j <<= 4;

@@ -2,14 +2,17 @@
 #include <fstream>
 #include <string>
 #include <sstream>
-#include <map>
-#include <set>
+//#include <map>
+//#include <set>
+#include <tr1/unordered_map>
+#include <tr1/unordered_set>
 #include <stdio.h>
 #include <stdlib.h>
 #include <memory.h>
 #include "util.h"
 
 using namespace std;
+using namespace std::tr1;
 
 /*
  * Author: Kun Sun (sunkun@szbl.ac.cn)
@@ -22,12 +25,13 @@ int main( int argc, char *argv[] ) {
 	if( argc != 6 ) {
 		cerr << "\nUsage: " << argv[0] << " <chr.info> <trim.log> <max.insert.size> <in.sam> <out.prefix>\n";
 		cerr << "This program is designed to remove the duplicate reads that have the same start and end/strand.\n\n";
+		cerr << "Note that in v2, map is replaced by unordered_map.\n\n";
 		return 1;
 	}
 
 	// loading info file
 //	cerr << "Loading genome.info ...\n";
-	map<string, map<uint64_t, fraghit> *> samRecord;
+	unordered_map<string, unordered_map<uint64_t, fraghit> *> samRecord;
 	string line, chr;
 	stringstream ss;
 	ifstream fin( argv[1] );
@@ -45,7 +49,7 @@ int main( int argc, char *argv[] ) {
 		ss.clear();
 		ss >> chr;
 //		cerr << "Adding " << chr << " ...\n";
-		samRecord.insert( pair<string, map<uint64_t, fraghit>*>(chr, new map<uint64_t, fraghit>()) );
+		samRecord.insert( pair<string, unordered_map<uint64_t, fraghit>*>(chr, new unordered_map<uint64_t, fraghit>()) );
 	}
 	fin.close();
 
@@ -65,11 +69,11 @@ int main( int argc, char *argv[] ) {
 	memset( size, 0, readNum*sizeof(unsigned int) );
 
 	// load sam file
-	map<string, map<uint64_t, fraghit> *> :: iterator sam_it;
-	map<string, map<uint64_t, fraghit> *> :: iterator no_such_chr = samRecord.end();
-	set<unsigned int> dup;
-	set<unsigned int> discard;
-	map<uint64_t, fraghit> :: iterator hit_it;
+	unordered_map<string, unordered_map<uint64_t, fraghit> *> :: iterator sam_it;
+	unordered_map<string, unordered_map<uint64_t, fraghit> *> :: iterator no_such_chr = samRecord.end();
+	unordered_set<unsigned int> dup;
+	unordered_set<unsigned int> discard;
+	unordered_map<uint64_t, fraghit> :: iterator hit_it;
 	fraghit hit;
 
 	fin.open( argv[4] );
@@ -182,8 +186,8 @@ int main( int argc, char *argv[] ) {
 	fin.clear();
 	fin.seekg( ios_base::beg );
 	lineNum = 0;
-	set<unsigned int> :: iterator non_dup = dup.end();
-	set<unsigned int> :: iterator non_discard = discard.end();
+	unordered_set<unsigned int> :: iterator non_dup = dup.end();
+	unordered_set<unsigned int> :: iterator non_discard = discard.end();
 	unsigned int unique=0;
 	while( true ) {
 		getline( fin, line );
@@ -238,7 +242,7 @@ int main( int argc, char *argv[] ) {
 				sizeCnt[ size[i] ] ++;
 			} else {	// the CIGAR makes the fragment longer than MAX_INSERT_SIZE !!!
 				cerr << "WARNING: Line " << i << " has an unacceptable size (" << size[i]
-						<< ") and will be discarded!\n";
+						<< ") and will be ignored!\n";
 			}
 		}
 	}
@@ -266,5 +270,4 @@ int main( int argc, char *argv[] ) {
 
 	return 0;
 }
-
 

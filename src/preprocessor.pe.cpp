@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <memory.h>
 #include <omp.h>
+#include <zlib.h>
 #include "common.h"
 
 using namespace std;
@@ -28,7 +29,7 @@ using namespace std;
  *	   @$		 => for reads without frontG and conversions
  *
  * TODO: Use LARGE buffer to store the modified reads per batch then write
- *       it to the output files after the multi-thread trimming/conversion
+ *	   it to the output files after the multi-thread trimming/conversion
 **/
 
 /*
@@ -73,6 +74,15 @@ bool check_mismatch_dynamic_PE( const string & s1, string & s2, unsigned int pos
 	return true;
 }
 
+bool inline is_revcomp( const char a, const char b ) {
+	switch( a ) {
+		case 'A': return b=='T';
+		case 'C': return b=='G';
+		case 'G': return b=='C';
+		case 'T': return b=='A';
+		default : return false;
+	}
+}
 
 int main( int argc, const char *argv[] ) {
 	if( argc < 5 ) {
@@ -101,9 +111,9 @@ int main( int argc, const char *argv[] ) {
 			 << "  5': CTGTCTCTTATACACATCT\n"
 			 << "  3': CTGTCTCTTATACACATCT\n\n"
 			 << "Sequencing model (built-in):\n\n"
-			 << "              *read1 -->\n"
+			 << "			  *read1 -->\n"
 			 << "  5'adapter - NNNNNNNNNNsequenceNNNNNNNNNN - 3'adapter\n"
-			 << "                                <-- read2*\n\n";
+			 << "								<-- read2*\n\n";
 
 		return 2;
 	}
@@ -200,87 +210,142 @@ int main( int argc, const char *argv[] ) {
 	}
 
 	cerr << "Loading files ...\n";
+	// deal with multiple input files
+	vector<string> R1s, R2s;
+	string fileName="";
+	for(unsigned int i=0; argv[1][i]!='\0'; ++i) {
+		if( argv[1][i] == FILE_SEPARATOR ) {
+			R1s.push_back( fileName );
+			fileName.clear();
+		} else {
+			fileName += argv[1][i];
+		}
+	}
+	R1s.push_back( fileName );
 
-    // deal with multiple input files
-    vector<string> R1s, R2s;
-    string fileName="";
-    for(unsigned int i=0; argv[1][i]!='\0'; ++i) {
-        if( argv[1][i] == FILE_SEPARATOR ) {
-            R1s.push_back( fileName );
-            fileName.clear();
-        } else {
-            fileName += argv[1][i];
-        }
-    }
-    R1s.push_back( fileName );
+	fileName.clear();
+	for(unsigned int i=0; argv[2][i]!='\0'; ++i) {
+		if( argv[2][i] == FILE_SEPARATOR ) {
+			R2s.push_back( fileName );
+			fileName.clear();
+		} else {
+			fileName += argv[2][i];
+		}
+	}
+	R2s.push_back( fileName );
+	
+	if( R1s.size() != R2s.size() ) {
+		cerr << "Fatal error: Read1 and Read2 do not contain equal sized files!\n";
+		return 10;
+	}
+	unsigned int totalFiles = R1s.size();
+	cout << "INFO: " << totalFiles << " paired fastq files will be loaded.\n";
 
-    fileName.clear();
-    for(unsigned int i=0; argv[2][i]!='\0'; ++i) {
-        if( argv[2][i] == FILE_SEPARATOR ) {
-            R2s.push_back( fileName );
-            fileName.clear();
-        } else {
-            fileName += argv[2][i];
-        }
-    }
-    R2s.push_back( fileName );
-    
-    if( R1s.size() != R2s.size() ) {
-        cerr << "Fatal error: Read1 and Read2 do not contain equal sized files!\n";
-        return 10;
-    }
-    unsigned int totalFiles = R1s.size();
-    cout << "INFO: " << totalFiles << " paired fastq files will be loaded.\n";
-
-    string base = argv[4];
+	string base = argv[4];
 	ofstream fout1( (base+".R1.fq").c_str() ), fout2( (base+".R2.fq").c_str() );
 	if( fout1.fail() || fout2.fail() ) {
 		cout << "Error: write file failed!\n";
 		fout1.close();
-        fout2.close();
+		fout2.close();
 		return 3;
 	}
 	// set HEX format number output
 	fout1.setf(ios::hex, ios::basefield);
 	fout2.setf(ios::hex, ios::basefield);
-    
-    ifstream fq1, fq2;
-    register unsigned int line = 1;
-    for( unsigned int fileCnt=0; fileCnt!=totalFiles; ++ fileCnt ) {
-        fq1.open( R1s[fileCnt] );
-        fq2.open( R2s[fileCnt] );
-        if( fq1.fail() || fq2.fail() ) {
-            cout << "Error: open fastq file failed!\n";
-            fq1.close();
-            fq2.close();
-            fout1.close();
-            fout2.close();
-            return 11;
-        }
+	
+	ifstream fq1, fq2;
+	gzFile gfp1, gfp2;
+	char * gz_buffer = new char [ MAX_SEQNAME_SIZE ];
+	register unsigned int line = 1;
+	for( unsigned int fileCnt=0; fileCnt!=totalFiles; ++ fileCnt ) {
+		bool file_is_gz = false;
+		register unsigned int i_file = R1s[fileCnt].size() - 3;
+		register const char * p_file = R1s[fileCnt].c_str();
+		if( p_file[i_file]=='.' && p_file[i_file+1]=='g' && p_file[i_file+2]=='z' ) {	// .gz file
+			file_is_gz = true;
+			gfp1 = gzopen( p_file, "r" );
+			gfp2 = gzopen( R2s[fileCnt].c_str(), "r" );
+			if( gfp1==NULL || gfp2==NULL ) {
+				cerr << "Error: open fastq file failed!\n";
+				fout1.close();
+				fout2.close();
+				return 11;
+			}
+		} else {	// plain text
+			file_is_gz = false;
+			fq1.open( R1s[fileCnt] );
+			fq2.open( R2s[fileCnt] );
+			if( fq1.fail() || fq2.fail() ) {
+				cerr << "Error: open fastq file failed!\n";
+				fout1.close();
+				fout2.close();
+				return 11;
+			}
+		}
+		// load and process reads
+		while( true ) {
+			unsigned int loaded = 0;
+			if( file_is_gz ) {
+				while( true ) {
+					if( gzgets( gfp1, gz_buffer, MAX_SEQNAME_SIZE ) == NULL ) break;
+					id1  [ loaded ] = gz_buffer;
+					gzgets( gfp1, gz_buffer, MAX_SEQNAME_SIZE );
+					seq1 [ loaded ] = gz_buffer;
+					gzgets( gfp1, gz_buffer, MAX_SEQNAME_SIZE );	// this line is useless
+					gzgets( gfp1, gz_buffer, MAX_SEQNAME_SIZE );
+					qual1 [ loaded ] = gz_buffer;
 
-        while( true ) {
-            // get fastq reads
-            unsigned int loaded = 0;
-            while( true ) {
-                getline( fq1, id1  [ loaded ] );
-                if( fq1.eof() )break;
-                getline( fq1, seq1 [ loaded ] );
-                getline( fq1, unk );
-                getline( fq1, qual1[ loaded ] );
+					id1 [ loaded ].pop_back();	// trim the tail '\n'
+					seq1[ loaded ].pop_back();
+					if( qual1[ loaded ].size() != id1[ loaded ].size() )	//the last read may not contain '\n' for quality line
+						qual1[ loaded ].pop_back();
 
-                ++ loaded;
-                if( loaded == READS_PER_BATCH )
-                    break;
-            }
-            //cerr << "loaded: " << loaded << '\n';
-            if( loaded == 0 )
-                break;
-            for(register unsigned int i=0; i!=loaded; ++i ) {
-                getline( fq2, id2  [ i ] );
-                getline( fq2, seq2 [ i ] );
-                getline( fq2, unk );
-                getline( fq2, qual2[ i ] );
+					++ loaded;
+					if( loaded == READS_PER_BATCH )
+						break;
+				}
+				if( loaded == 0 )	// reach the end of file
+					break;
+				// read 2
+				for( register unsigned int i=0; i!=loaded; ++i ) {
+					gzgets( gfp2, gz_buffer, MAX_SEQNAME_SIZE );
+					id2  [ i ] = gz_buffer;
+					gzgets( gfp2, gz_buffer, MAX_SEQNAME_SIZE );
+					seq2 [ i ] = gz_buffer;
+					gzgets( gfp2, gz_buffer, MAX_SEQNAME_SIZE );	// this line is useless
+					gzgets( gfp2, gz_buffer, MAX_SEQNAME_SIZE );
+					qual2 [ i ] = gz_buffer;
 
+					id2 [ i ].pop_back();
+					seq2[ i ].pop_back();
+					if( qual2[i].size() != id2[i].size() )
+					qual2 [ i ].pop_back();
+				}
+			} else {
+				while( true ) {
+					getline( fq1, id1  [ loaded ] );
+					if( fq1.eof() )break;
+					getline( fq1, seq1 [ loaded ] );
+					getline( fq1, unk );
+					getline( fq1, qual1[ loaded ] );
+	
+					++ loaded;
+					if( loaded == READS_PER_BATCH )
+						break;
+				}
+				if( loaded == 0 )
+					break;
+				for( register unsigned int i=0; i!=loaded; ++i ) {
+					getline( fq2, id2  [ i ] );
+					getline( fq2, seq2 [ i ] );
+					getline( fq2, unk );
+					getline( fq2, qual2[ i ] );
+				}
+			}
+
+			// check whether read1 and read2 are of the same read length
+			// TODO: if the reads are longer than "cycle" paramater, only keep the head "cycle" ones
+			for( register unsigned int i=0; i!=loaded; ++i ) {
 				if( seq2[i].size() != seq1[i].size() ) {
 					if( seq2[i].size() > seq1[i].size() ) {
 						seq2[i].resize(  seq1[i].size()  );
@@ -290,315 +355,347 @@ int main( int argc, const char *argv[] ) {
 						qual1[i].resize( qual2[i].size() );
 					}
 				}
-            }
 
-            // start parallalization
-            omp_set_num_threads( thread );
-            #pragma omp parallel
-            {
-                unsigned int tn = omp_get_thread_num();
-                unsigned int start = loaded * tn / thread;
-                unsigned int end   = loaded * (tn+1) / thread;
-
-                // normalization
-                b1stored[tn] = 0;
-                b2stored[tn] = 0;
-                memset( R1stat[tn], 0, cycle*sizeof(fastqstat) );
-                memset( R2stat[tn], 0, cycle*sizeof(fastqstat) );
-            
-                string conversionLog;
-                register int i, j;
-                register unsigned int last_seed;
-                vector<unsigned int> seed;
-                vector<unsigned int> :: iterator it;
-                const char *p, *q;
-                char *conversion = new char [MAX_CONVERSION];
-                char numstr[10]; // enough to hold all numbers up to 99,999,999 plus ':'
-
-                for( unsigned int ii=start; ii!=end; ++ii ) {
-                    // fqstatistics
-                    p = seq1[ii].c_str();
-                    q = seq2[ii].c_str();
-                    for( i=0; i!=cycle; ++i ) {
-                        switch ( p[i] ) {
-                            case 'a':
-                            case 'A': R1stat[tn][i].A ++; break;
-                            case 'c':
-                            case 'C': R1stat[tn][i].C ++; break;
-                            case 'g':
-                            case 'G': R1stat[tn][i].G ++; break;
-                            case 't':
-                            case 'T': R1stat[tn][i].T ++; break;
-                            default : R1stat[tn][i].N ++; break;
-                        }
-                        switch ( q[i] ) {
-                            case 'a':
-                            case 'A': R2stat[tn][i].A ++; break;
-                            case 'c':
-                            case 'C': R2stat[tn][i].C ++; break;
-                            case 'g':
-                            case 'G': R2stat[tn][i].G ++; break;
-                            case 't':
-                            case 'T': R2stat[tn][i].T ++; break;
-                            default : R2stat[tn][i].N ++; break;
-                        }
-                    }
-
-                    // quality control
-                    p = qual1[ii].c_str();
-                    q = qual2[ii].c_str();
-                    for( i=qual1[ii].length()-1; i; --i ) {
-                        if( p[i]>=quality && q[i]>=quality ) break;
-                    }
-                    ++ i;
-                    if( i < min_length ) { // not long enough
-                        ++ dropped[ tn ];
-                        continue;
-                    }
-                    seq1[ii].resize(  i );
-                    seq2[ii].resize(  i );
-                    qual1[ii].resize( i );
-                    qual2[ii].resize( i );
-
-                    // looking for seed target, 1 mismatch is allowed for these 2 seeds
-                    // which means seq1 and seq2 at least should take 1 perfect seed match
-                    seed.clear();
-                    for( i=0; (i=seq1[ii].find(ai->adapter_index, i)) != string::npos; ++i )
-                        seed.push_back( i );
-                    for( i=0; (i=seq2[ii].find(ai->adapter_index, i)) != string::npos; ++i )
-                        seed.push_back( i );
-
-                    sort( seed.begin(), seed.end() );
-
-                    last_seed = impossible_seed;	// a position which cannot be in seed
-                    for( it=seed.begin(); it!=seed.end(); ++it ) {
-                        if( *it != last_seed ) {
-                        // as there maybe the same value in seq1_seed and seq2_seed,
-                        // use this to avoid re-calculate that pos
-                            if( check_mismatch_dynamic_PE( seq1[ii], seq2[ii], *it, ai) )
-                                break;
-                            last_seed = *it;
-                        }
-                    }
-                    if( it != seed.end() ) {	// adapter found
-                        ++ real_adapter[tn];
-                        if( *it >= min_length )	{
-                            seq1[ii].resize(  *it );
-                            seq2[ii].resize(  *it );
-                            qual1[ii].resize( *it );
-                            qual2[ii].resize( *it );
-                        } else {	// drop this read as its length is not enough
-                            ++ dropped[tn];
-                            continue;
-                        }
-                    } else {	// seed not found, now check the tail 2 or 1, if perfect match, drop these 2
-                        i = seq1[ii].length() - 2;
-                        p = seq1[ii].c_str();
-                        q = seq2[ii].c_str();
-                        if( p[i]==ai->adapter_r1[0] && p[i+1]==ai->adapter_r1[1] &&
-                                    q[i]==ai->adapter_r2[0] && q[i+1]==ai->adapter_r2[1] ) {
-                            if( i < min_length ) {
-                                ++ dropped[tn];
-                                continue;
-                            }
-                            seq1[ii].resize( i );
-                            seq2[ii].resize( i );
-                            qual1[ii].resize( i );
-                            qual2[ii].resize( i );
-
-                            ++ tail_adapter[tn];
-                        } else {	// tail 2 is not good, check tail 1
-                            ++ i;
-                            if( p[i] == ai->adapter_r1[0] && q[i] == ai->adapter_r2[0] ) {
-                                if( i < min_length ) {
-                                    ++ dropped[tn];
-                                    continue;
-                                }
-                                seq1[ii].resize(  i );
-                                seq2[ii].resize(  i );
-                                qual1[ii].resize( i );
-                                qual2[ii].resize( i );
-
-                                ++ tail_adapter[tn];
-                            }
-                        }
-                    }
-
-                    //check if there is any white space in the IDs; if so, remove all the data after the whitespace
-                    j = id1[ii].size();
-                    p = id1[ii].c_str();
-                    for( i=1; i!=j; ++i ) {
-                        if( p[i]==' ' || p[i]=='\t' ) {	// white space, then trim ID
-                            id1[ii].resize( i );
-                            break;
-                        }
-                    }
-                    j = id2[ii].size();
-                    q = id2[ii].c_str();
-                    for( i=0; i!=j; ++i ) {
-                        if( q[i]==' ' || q[i]=='\t' ) {	// white space, then trim ID
-                            id2[ii].resize( i );
-                            break;
-                        }
-                    }
-
-                    // do C->T and G->A conversion
-                    if( mode == 0 ) {	// no need to do conversion
-                        /*
-                        fout1 << id1 << '\n' << seq1 << "\n+\n" << qual1 << '\n';
-                        fout2 << id2 << '\n' << seq2 << "\n+\n" << qual2 << '\n';
-                        */
-                        b1stored[tn] += sprintf( buffer1[tn]+b1stored[tn], "%s\n%s\n+\n%s\n",
-                                    id1[ii].c_str(), seq1[ii].c_str(), qual1[ii].c_str() );
-                        b2stored[tn] += sprintf( buffer2[tn]+b2stored[tn], "%s\n%s\n+\n%s\n",
-                                    id2[ii].c_str(), seq2[ii].c_str(), qual2[ii].c_str() );
-                    } else if( mode == 3 ) {	// in this implementation, id1 and id2 are different!!!
-                        // modify id1 to add line number (to facilitate removing ambigous step)
-                        // in mode 3, there is NO endC and frontG issues
-                        id1[ii][0] = CONVERSION_LOG_END;
-                        j = seq1[ii].size();	// seq1 and seq2 are of the same size
-                        conversionLog = LINE_NUMBER_SEPARATOR;
-                        for( i=0; i!=j; ++i ) {
-                            if( seq1[ii][i] == 'C' ) {
-                                seq1[ii][i] = 'T';
-                                sprintf( numstr, "%x%c", i, CONVERSION_LOG_SEPARATOR );
-                                conversionLog += numstr;
-                            }
-                        }
-                        if( conversionLog.back() == CONVERSION_LOG_SEPARATOR )
-                            conversionLog.pop_back();
-                        /*fout1 << NORMAL_SEQNAME_START << line << conversionLog << id1 << '\n'
-                                << seq1 << "\n+\n" << qual1 << '\n';*/
-                        b1stored[tn] += sprintf( buffer1[tn]+b1stored[tn], "%c%x%s%s\n%s\n+\n%s\n",
-                                                    NORMAL_SEQNAME_START, line+ii, conversionLog.c_str(),
-                                                    id1[ii].c_str(), seq1[ii].c_str(), qual1[ii].c_str() );
-
-                        id2[ii][0] = CONVERSION_LOG_END;
-                        conversionLog = NORMAL_SEQNAME_START;	// read2 does not record line number
-                        for( i=0; i!=j; ++i ) {
-                            if( seq2[ii][i] == 'G' ) {
-                                seq2[ii][i] = 'A';
-                                sprintf( numstr, "%x%c", i, CONVERSION_LOG_SEPARATOR );
-                                conversionLog += numstr;
-                            }
-                        }
-                        if( conversionLog.back() == CONVERSION_LOG_SEPARATOR )
-                            conversionLog.pop_back();
-                        // do not add line number to read 2
-                        /*fout2 << conversionLog << id2 << '\n' << seq2 << "\n+\n" << qual2 << '\n';*/
-                        b2stored[tn] += sprintf( buffer2[tn]+b2stored[tn], "%s%s\n%s\n+\n%s\n",
-                            conversionLog.c_str(), id2[ii].c_str(), seq2[ii].c_str(), qual2[ii].c_str() );
-                    } else if ( mode == 4 ) {	// this is the major task for EMaligner
-                        // modify id1 to add line number (to facilitate the removing ambigous step)
-                        // check seq1 for C>T conversion
-                        id1[ii][0] = CONVERSION_LOG_END;
-                        conversionLog = LINE_NUMBER_SEPARATOR;
-                        j = seq1[ii].size()-1;
-                        if( seq1[ii].back() == 'C' ) { //ther is a 'C' and the end, discard it (but record its Quality score);
-                            //otherwise it may introduce a mismatch in alignment
-                            conversionLog += qual1[ii].back();
-                            conversionLog += KEEP_QUAL_MARKER;
-                            seq1[ii].pop_back();
-                            qual1[ii].pop_back();
-                        }
-                        for( i=0; i!=j; ++i ) {
-                            if( seq1[ii][i]=='C' && seq1[ii][i+1]=='G' ) {
-                                seq1[ii][i] = 'T';
-                                sprintf( numstr, "%x%c", i, CONVERSION_LOG_SEPARATOR );
-                                conversionLog += numstr;
-                            }
-                        }
-                        if( conversionLog.back() == CONVERSION_LOG_SEPARATOR )
-                            conversionLog.pop_back();
-                        /*fout1 << NORMAL_SEQNAME_START << line << conversionLog << id1 << '\n'
-                                << seq1 << "\n+\n" << qual1 << '\n';*/
-                        b1stored[tn] += sprintf( buffer1[tn]+b1stored[tn], "%c%x%s%s\n%s\n+\n%s\n",
-                                    NORMAL_SEQNAME_START, line+ii, conversionLog.c_str(),
-                                    id1[ii].c_str(), seq1[ii].c_str(), qual1[ii].c_str() );
-                        // format for ID1:
-                        // if there is a C at the end
-                        //	@line_number '+' x| C1;C2;C3$ raw_seq_name
-                        //	the | is the marker for the existence of tail 'C' and 'x' is its quality score
-                        //	if exists, | is ALWAYS two bytes after '+' (use this to test its existence)
-                        // if there is No C at the end
-                        //	@line_number '+' C1&C2&C3$ raw_seq_name
-                        //
-                        // All the numbers in line_number and C1,C2,C3... are HEX
-
-                        // check seq2 for G>A conversion
-                        id2[ii][0] = CONVERSION_LOG_END;
-                        conversionLog = NORMAL_SEQNAME_START;
-                        if( seq2[ii][0] == 'G' ) { //'G' at the front, discard it (but record its Quality score)
-                            conversionLog += qual2[ii][0];
-                            conversionLog += KEEP_QUAL_MARKER;
-                        }
-                        j = seq2[ii].size();
-                        for( i=1; i!=j; ++i ) {
-                            if( seq2[ii][i]=='G' && seq2[ii][i-1]=='C' ) {
-                                seq2[ii][i] = 'A';
-                                sprintf( numstr, "%x%c", i, CONVERSION_LOG_SEPARATOR );
-                                conversionLog += numstr;
-                            }
-                        }
-                        if( conversionLog.back() == CONVERSION_LOG_SEPARATOR )
-                            conversionLog.pop_back();
-                        if( seq2[ii][0] != 'G' ) {
-                            /*fout2 << conversionLog << id2 << '\n' << seq2 << "\n+\n" << qual2 << '\n';*/
-                            b2stored[tn] += sprintf( buffer2[tn]+b2stored[tn], "%s%s\n%s\n+\n%s\n",
-                                            conversionLog.c_str(), id2[ii].c_str(), seq2[ii].c_str(), qual2[ii].c_str() );
-                        } else {
-                            p = seq2[ii].c_str();
-                            q = qual2[ii].c_str();
-                            /*fout2 << conversionLog << id2 << '\n' << p+1 << "\n+\n" << q+1 << '\n';*/
-                            b2stored[tn] += sprintf( buffer2[tn]+b2stored[tn], "%s%s\n%s\n+\n%s\n",
-                                                    conversionLog.c_str(), id2[ii].c_str(), p+1, q+1 );
-                        }
-                        // format for ID2:
-                        // if there is a G at the front
-                        //	@x| C1&C2&C3$ raw_seq_name
-                        //	if exists, | is ALWAYS two bytes after '@' (use this to test its existence)
-                        // if there is No G at the front
-                        //	@C1&C2&C3$ raw_seq_name
-                        //
-                        // All the numbers in line_number and C1,C2,C3... are HEX
-                    }
-                }
-            }	// parallel body
-            // write output and update fastq statistics
-            for(register unsigned int i=0; i!=thread; ++i ) {
-                fout1 << buffer1[i];
-			}
-            for(register unsigned int i=0; i!=thread; ++i ) {
-                fout2 << buffer2[i];
+				if( seq1[i].size() > cycle ) {
+					seq1[i].resize(  cycle );
+					qual1[i].resize( cycle );
+					seq2[i].resize(  cycle );
+					qual2[i].resize( cycle );
+				}
 			}
 
-            for(register unsigned int i=0; i!=thread; ++i ) {
-                for( unsigned int j=0; j!=cycle; ++j ) {
-                    AllR1stat[j].A += R1stat[i][j].A;
-                    AllR1stat[j].C += R1stat[i][j].C;
-                    AllR1stat[j].G += R1stat[i][j].G;
-                    AllR1stat[j].T += R1stat[i][j].T;
-                    AllR1stat[j].N += R1stat[i][j].N;
+			// start parallalization
+			omp_set_num_threads( thread );
+			#pragma omp parallel
+			{
+				unsigned int tn = omp_get_thread_num();
+				unsigned int start = loaded * tn / thread;
+				unsigned int end   = loaded * (tn+1) / thread;
 
-                    AllR2stat[j].A += R2stat[i][j].A;
-                    AllR2stat[j].C += R2stat[i][j].C;
-                    AllR2stat[j].G += R2stat[i][j].G;
-                    AllR2stat[j].T += R2stat[i][j].T;
-                    AllR2stat[j].N += R2stat[i][j].N;
-                }
-            }
-            line += loaded;
-            cerr << '\r' << line-1 << " reads loaded";
+				// normalization
+				b1stored[tn] = 0;
+				b2stored[tn] = 0;
+				memset( R1stat[tn], 0, cycle*sizeof(fastqstat) );
+				memset( R2stat[tn], 0, cycle*sizeof(fastqstat) );
+			
+				string conversionLog;
+				register int i, j;
+				register unsigned int last_seed;
+				vector<unsigned int> seed;
+				vector<unsigned int> :: iterator it;
+				const char *p, *q;
+				char *conversion = new char [MAX_CONVERSION];
+				char numstr[10]; // enough to hold all numbers up to 99,999,999 plus ':'
 
-            if( fq1.eof() ) break;
-        }
-        fq1.close();
-        fq2.close();
-    }
+				for( unsigned int ii=start; ii!=end; ++ii ) {
+					// fqstatistics
+					p = seq1[ii].c_str();
+					q = seq2[ii].c_str();
+
+					j = seq1[ii].size();
+					if( j > cycle )
+						j = cycle;
+					for( i=0; i!=j; ++i ) {
+						switch ( p[i] ) {
+							case 'a':
+							case 'A': R1stat[tn][i].A ++; break;
+							case 'c':
+							case 'C': R1stat[tn][i].C ++; break;
+							case 'g':
+							case 'G': R1stat[tn][i].G ++; break;
+							case 't':
+							case 'T': R1stat[tn][i].T ++; break;
+							default : R1stat[tn][i].N ++; break;
+						}
+					}
+					j = seq2[ii].size();
+					if( j > cycle )
+						j = cycle;
+					for( i=0; i!=j; ++i ) {
+						switch ( q[i] ) {
+							case 'a':
+							case 'A': R2stat[tn][i].A ++; break;
+							case 'c':
+							case 'C': R2stat[tn][i].C ++; break;
+							case 'g':
+							case 'G': R2stat[tn][i].G ++; break;
+							case 't':
+							case 'T': R2stat[tn][i].T ++; break;
+							default : R2stat[tn][i].N ++; break;
+						}
+					}
+
+					// quality control
+					p = qual1[ii].c_str();
+					q = qual2[ii].c_str();
+					for( i=qual1[ii].length()-1; i; --i ) {
+						if( p[i]>=quality && q[i]>=quality ) break;
+					}
+					++ i;
+					if( i < min_length ) { // not long enough
+						++ dropped[ tn ];
+						continue;
+					}
+					seq1[ii].resize(  i );
+					seq2[ii].resize(  i );
+					qual1[ii].resize( i );
+					qual2[ii].resize( i );
+
+					// looking for seed target, 1 mismatch is allowed for these 2 seeds
+					// which means seq1 and seq2 at least should take 1 perfect seed match
+					seed.clear();
+					for( i=0; (i=seq1[ii].find(ai->adapter_index, i)) != string::npos; ++i )
+						seed.push_back( i );
+					for( i=0; (i=seq2[ii].find(ai->adapter_index, i)) != string::npos; ++i )
+						seed.push_back( i );
+
+					sort( seed.begin(), seed.end() );
+
+					last_seed = impossible_seed;	// a position which cannot be in seed
+					for( it=seed.begin(); it!=seed.end(); ++it ) {
+						if( *it != last_seed ) {
+						// as there maybe the same value in seq1_seed and seq2_seed,
+						// use this to avoid re-calculate that pos
+							if( check_mismatch_dynamic_PE( seq1[ii], seq2[ii], *it, ai) )
+								break;
+							last_seed = *it;
+						}
+					}
+					if( it != seed.end() ) {	// adapter found
+						++ real_adapter[tn];
+						if( *it >= min_length )	{
+							seq1[ii].resize(  *it );
+							seq2[ii].resize(  *it );
+							qual1[ii].resize( *it );
+							qual2[ii].resize( *it );
+						} else {	// drop this read as its length is not enough
+							++ dropped[tn];
+							continue;
+						}
+					} else {	// seed not found, now check the tail 2 or 1, if perfect match, drop these 2
+						i = seq1[ii].length() - 2;
+						p = seq1[ii].c_str();
+						q = seq2[ii].c_str();
+						if( p[i]==ai->adapter_r1[0] && p[i+1]==ai->adapter_r1[1] &&
+									q[i]==ai->adapter_r2[0] && q[i+1]==ai->adapter_r2[1] ) {
+							// if it is a real adapter, then Read1 and Read2 should be complimentary
+							// in real data, the heading 5 bp are usually of poor quality, therefore we test the 6th, 7th
+							if( is_revcomp(p[5], q[i-6]) && is_revcomp(q[5], p[i-6]) ) {
+								if( i < min_length ) {
+									++ dropped[tn];
+									continue;
+								}
+								seq1[ii].resize( i );
+								seq2[ii].resize( i );
+								qual1[ii].resize( i );
+								qual2[ii].resize( i );
+
+								++ tail_adapter[tn];
+							}
+						} else {	// tail 2 is not good, check tail 1
+							++ i;
+							if( p[i] == ai->adapter_r1[0] && q[i] == ai->adapter_r2[0] ) {
+								if(is_revcomp(p[5], q[i-6]) && is_revcomp(q[5], p[i-6]) &&
+										is_revcomp(p[6], q[i-7]) && is_revcomp(q[6], p[i-7]) ) {
+									if( i < min_length ) {
+										++ dropped[tn];
+										continue;
+									}
+									seq1[ii].resize(  i );
+									seq2[ii].resize(  i );
+									qual1[ii].resize( i );
+									qual2[ii].resize( i );
+
+									++ tail_adapter[tn];
+								}
+							}
+						}
+					}
+
+					//check if there is any white space in the IDs; if so, remove all the data after the whitespace
+					j = id1[ii].size();
+					p = id1[ii].c_str();
+					for( i=1; i!=j; ++i ) {
+						if( p[i]==' ' || p[i]=='\t' ) {	// white space, then trim ID
+							id1[ii].resize( i );
+							break;
+						}
+					}
+					j = id2[ii].size();
+					q = id2[ii].c_str();
+					for( i=0; i!=j; ++i ) {
+						if( q[i]==' ' || q[i]=='\t' ) {	// white space, then trim ID
+							id2[ii].resize( i );
+							break;
+						}
+					}
+
+					// do C->T and G->A conversion
+					if( mode == 0 ) {	// no need to do conversion
+						/*
+						fout1 << id1 << '\n' << seq1 << "\n+\n" << qual1 << '\n';
+						fout2 << id2 << '\n' << seq2 << "\n+\n" << qual2 << '\n';
+						*/
+						b1stored[tn] += sprintf( buffer1[tn]+b1stored[tn], "%s\n%s\n+\n%s\n",
+									id1[ii].c_str(), seq1[ii].c_str(), qual1[ii].c_str() );
+						b2stored[tn] += sprintf( buffer2[tn]+b2stored[tn], "%s\n%s\n+\n%s\n",
+									id2[ii].c_str(), seq2[ii].c_str(), qual2[ii].c_str() );
+					} else if( mode == 3 ) {	// in this implementation, id1 and id2 are different!!!
+						// modify id1 to add line number (to facilitate removing ambigous step)
+						// in mode 3, there is NO endC and frontG issues
+						id1[ii][0] = CONVERSION_LOG_END;
+						j = seq1[ii].size();	// seq1 and seq2 are of the same size
+						conversionLog = LINE_NUMBER_SEPARATOR;
+						for( i=0; i!=j; ++i ) {
+							if( seq1[ii][i] == 'C' ) {
+								seq1[ii][i] = 'T';
+								sprintf( numstr, "%x%c", i, CONVERSION_LOG_SEPARATOR );
+								conversionLog += numstr;
+							}
+						}
+						if( conversionLog.back() == CONVERSION_LOG_SEPARATOR )
+							conversionLog.pop_back();
+						/*fout1 << NORMAL_SEQNAME_START << line << conversionLog << id1 << '\n'
+								<< seq1 << "\n+\n" << qual1 << '\n';*/
+						b1stored[tn] += sprintf( buffer1[tn]+b1stored[tn], "%c%x%s%s\n%s\n+\n%s\n",
+													NORMAL_SEQNAME_START, line+ii, conversionLog.c_str(),
+													id1[ii].c_str(), seq1[ii].c_str(), qual1[ii].c_str() );
+
+						id2[ii][0] = CONVERSION_LOG_END;
+						conversionLog = NORMAL_SEQNAME_START;	// read2 does not record line number
+						for( i=0; i!=j; ++i ) {
+							if( seq2[ii][i] == 'G' ) {
+								seq2[ii][i] = 'A';
+								sprintf( numstr, "%x%c", i, CONVERSION_LOG_SEPARATOR );
+								conversionLog += numstr;
+							}
+						}
+						if( conversionLog.back() == CONVERSION_LOG_SEPARATOR )
+							conversionLog.pop_back();
+						// do not add line number to read 2
+						/*fout2 << conversionLog << id2 << '\n' << seq2 << "\n+\n" << qual2 << '\n';*/
+						b2stored[tn] += sprintf( buffer2[tn]+b2stored[tn], "%s%s\n%s\n+\n%s\n",
+							conversionLog.c_str(), id2[ii].c_str(), seq2[ii].c_str(), qual2[ii].c_str() );
+					} else if ( mode == 4 ) {	// this is the major task for EMaligner
+						// modify id1 to add line number (to facilitate the removing ambigous step)
+						// check seq1 for C>T conversion
+						id1[ii][0] = CONVERSION_LOG_END;
+						conversionLog = LINE_NUMBER_SEPARATOR;
+						j = seq1[ii].size()-1;
+						if( seq1[ii].back() == 'C' ) { //ther is a 'C' and the end, discard it (but record its Quality score);
+							//otherwise it may introduce a mismatch in alignment
+							conversionLog += qual1[ii].back();
+							conversionLog += KEEP_QUAL_MARKER;
+							seq1[ii].pop_back();
+							qual1[ii].pop_back();
+						}
+						for( i=0; i!=j; ++i ) {
+							if( seq1[ii][i]=='C' && seq1[ii][i+1]=='G' ) {
+								seq1[ii][i] = 'T';
+								sprintf( numstr, "%x%c", i, CONVERSION_LOG_SEPARATOR );
+								conversionLog += numstr;
+							}
+						}
+						if( conversionLog.back() == CONVERSION_LOG_SEPARATOR )
+							conversionLog.pop_back();
+						/*fout1 << NORMAL_SEQNAME_START << line << conversionLog << id1 << '\n'
+								<< seq1 << "\n+\n" << qual1 << '\n';*/
+						b1stored[tn] += sprintf( buffer1[tn]+b1stored[tn], "%c%x%s%s\n%s\n+\n%s\n",
+									NORMAL_SEQNAME_START, line+ii, conversionLog.c_str(),
+									id1[ii].c_str(), seq1[ii].c_str(), qual1[ii].c_str() );
+						// format for ID1:
+						// if there is a C at the end
+						//	@line_number '+' x| C1;C2;C3$ raw_seq_name
+						//	the | is the marker for the existence of tail 'C' and 'x' is its quality score
+						//	if exists, | is ALWAYS two bytes after '+' (use this to test its existence)
+						// if there is No C at the end
+						//	@line_number '+' C1&C2&C3$ raw_seq_name
+						//
+						// All the numbers in line_number and C1,C2,C3... are HEX
+
+						// check seq2 for G>A conversion
+						id2[ii][0] = CONVERSION_LOG_END;
+						conversionLog = NORMAL_SEQNAME_START;
+						if( seq2[ii][0] == 'G' ) { //'G' at the front, discard it (but record its Quality score)
+							conversionLog += qual2[ii][0];
+							conversionLog += KEEP_QUAL_MARKER;
+						}
+						j = seq2[ii].size();
+						for( i=1; i!=j; ++i ) {
+							if( seq2[ii][i]=='G' && seq2[ii][i-1]=='C' ) {
+								seq2[ii][i] = 'A';
+								sprintf( numstr, "%x%c", i, CONVERSION_LOG_SEPARATOR );
+								conversionLog += numstr;
+							}
+						}
+						if( conversionLog.back() == CONVERSION_LOG_SEPARATOR )
+							conversionLog.pop_back();
+						if( seq2[ii][0] != 'G' ) {
+							/*fout2 << conversionLog << id2 << '\n' << seq2 << "\n+\n" << qual2 << '\n';*/
+							b2stored[tn] += sprintf( buffer2[tn]+b2stored[tn], "%s%s\n%s\n+\n%s\n",
+											conversionLog.c_str(), id2[ii].c_str(), seq2[ii].c_str(), qual2[ii].c_str() );
+						} else {
+							p = seq2[ii].c_str();
+							q = qual2[ii].c_str();
+							/*fout2 << conversionLog << id2 << '\n' << p+1 << "\n+\n" << q+1 << '\n';*/
+							b2stored[tn] += sprintf( buffer2[tn]+b2stored[tn], "%s%s\n%s\n+\n%s\n",
+													conversionLog.c_str(), id2[ii].c_str(), p+1, q+1 );
+						}
+						// format for ID2:
+						// if there is a G at the front
+						//	@x| C1&C2&C3$ raw_seq_name
+						//	if exists, | is ALWAYS two bytes after '@' (use this to test its existence)
+						// if there is No G at the front
+						//	@C1&C2&C3$ raw_seq_name
+						//
+						// All the numbers in line_number and C1,C2,C3... are HEX
+					}
+				}
+			}	// parallel body
+			// write output and update fastq statistics
+			for(register unsigned int i=0; i!=thread; ++i ) {
+				fout1 << buffer1[i];
+			}
+			for(register unsigned int i=0; i!=thread; ++i ) {
+				fout2 << buffer2[i];
+			}
+
+			for(register unsigned int i=0; i!=thread; ++i ) {
+				for( unsigned int j=0; j!=cycle; ++j ) {
+					AllR1stat[j].A += R1stat[i][j].A;
+					AllR1stat[j].C += R1stat[i][j].C;
+					AllR1stat[j].G += R1stat[i][j].G;
+					AllR1stat[j].T += R1stat[i][j].T;
+					AllR1stat[j].N += R1stat[i][j].N;
+
+					AllR2stat[j].A += R2stat[i][j].A;
+					AllR2stat[j].C += R2stat[i][j].C;
+					AllR2stat[j].G += R2stat[i][j].G;
+					AllR2stat[j].T += R2stat[i][j].T;
+					AllR2stat[j].N += R2stat[i][j].N;
+				}
+			}
+			line += loaded;
+			cerr << '\r' << line-1 << " reads loaded";
+
+			if( file_is_gz ) {
+				if( gzeof( gfp1 ) ) break;
+			} else {
+				if( fq1.eof() ) break;
+			}
+		}	//load and process file loop
+
+		if( file_is_gz ) {
+			gzclose( gfp1 );
+			gzclose( gfp2 );
+		} else {
+			fq1.close();
+			fq2.close();
+		}
+	}
 
 	fout1.close();
 	fout2.close();
-
 	cerr << "\rDone: " << line-1 << " lines processed.\n";
 
 	// write trim.log
@@ -645,6 +742,7 @@ int main( int argc, const char *argv[] ) {
 	fout.close();
 
 	//free memory
+	delete [] gz_buffer;
 	for(unsigned int i=0; i!=thread; ++i) {
 		delete buffer1[i];
 		delete buffer2[i];

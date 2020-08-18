@@ -202,6 +202,11 @@ int main( int argc, char *argv[] ) {
 			getline( fq1, unk );
 			getline( fq1, qual1[ loaded ] );
 
+			if( id1[loaded].size() > cycle ) {
+				id1[loaded].resize( cycle );
+				qual1[loaded].resize( cycle );
+			}
+
 			++ loaded;
 			if( loaded == READS_PER_BATCH )
 				break;
@@ -234,7 +239,10 @@ int main( int argc, char *argv[] ) {
 			for( unsigned int ii=start; ii!=end; ++ii ) {
 				// fqstatistics
 				p = seq1[ii].c_str();
-				for( i=0; i!=cycle; ++i ) {
+				j = seq1[ii].size();
+				if( j > cycle )
+					j = cycle;
+				for( i=0; i!=j; ++i ) {
 					switch ( p[i] ) {
 						case 'a':
 						case 'A': R1stat[tn][i].A ++; break;
@@ -293,6 +301,7 @@ int main( int argc, char *argv[] ) {
 						qual1[ii].resize( i );
 
 						++ tail_adapter[tn];
+/*//maybe it is not that good to check tail-1?
 					} else {	// tail 2 is not good, check tail 1
 						++ i;
 						if( p[i] == ai->adapter_r1[0] ) {
@@ -305,6 +314,7 @@ int main( int argc, char *argv[] ) {
 
 							++ tail_adapter[tn];
 						}
+*/
 					}
 				}
 

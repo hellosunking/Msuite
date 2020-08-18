@@ -23,19 +23,18 @@ dat = read.table( infile, head=T );
 
 ## normalization
 for( i in 1:nrow(dat) ) {
-	pass = dat[i,2] + dat[i,3] + dat[i,4] + dat[i,5];
-	all  = pass + dat[i,6];
-
-	pass = pass / 100;
-	dat[i,2] = dat[i,2] / pass;
-	dat[i,3] = dat[i,3] / pass;
-	dat[i,4] = dat[i,4] / pass;
-	dat[i,5] = dat[i,5] / pass;
-
-	dat[i,6] = dat[i,6] / all * 100;
+	all = dat[i,2] + dat[i,3] + dat[i,4] + dat[i,5] + dat[i,6];
+	all = all / 100;
+	dat[i,2] = dat[i,2] / all;
+	dat[i,3] = dat[i,3] / all;
+	dat[i,4] = dat[i,4] / all;
+	dat[i,5] = dat[i,5] / all;
+	dat[i,6] = dat[i,6] / all;
 }
-ymax=max( dat[,2],dat[,3],dat[,4],dat[,5],dat[,6] ) + 20;
-
+ymax = max( dat[,2:6] ) + 10;
+if( ymax > 100 ) {
+	ymax = 100;
+}
 out = paste( outprefix, 'pdf', sep='.' );
 pdf( out, width=8, height=4 );
 par( mar=c(5,5,1,1) );
