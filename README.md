@@ -1,3 +1,4 @@
+![Msuite logo](https://github.com/hellosunking/hellosunking.github.io/blob/master/logos/Msuite.png "Logo")
 
 # Msuite: Multi-mode DNA methylation data analysis suite
 Version 1.1.0, Aug 2020<br />
@@ -230,6 +231,12 @@ regions (e.g., CpG islands).
 
 The `pe_bam2bed.pl` and `se_bam2bed.pl` are designed to translate the aligned BAM file into BED format file, and
 `bed2wig` is designed to translate BED file into WIG files (e.g., for coverage profiles).
+
+## Citation
+When referencing, please cite "Sun K, Li L, Ma L, Zhao Y, Deng L, Wang H and Sun H:
+**Msuite: a high-performance and versatile DNA methylation data analysis toolkit.**
+*Patterns* 2020 Nov 13; 1(8):100127."
+[Full Text](https://doi.org/10.1016/j.patter.2020.100127 "Full text")
 
 ---
 Please send bug reports to Kun Sun \(sunkun@szbl.ac.cn\).<br />
