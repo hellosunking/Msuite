@@ -293,12 +293,12 @@ int main( int argc, const char *argv[] ) {
 					seq1 [ loaded ] = gz_buffer;
 					gzgets( gfp1, gz_buffer, MAX_SEQNAME_SIZE );	// this line is useless
 					gzgets( gfp1, gz_buffer, MAX_SEQNAME_SIZE );
-					qual1 [ loaded ] = gz_buffer;
+					qual1[ loaded ] = gz_buffer;
 
 					id1 [ loaded ].pop_back();	// trim the tail '\n'
 					seq1[ loaded ].pop_back();
-					if( qual1[ loaded ].size() != id1[ loaded ].size() )	//the last read may not contain '\n' for quality line
-						qual1[ loaded ].pop_back();
+					if( qual1[loaded].size() != seq1[loaded].size() )	//the last read may not contain '\n' for quality line
+						qual1[loaded].pop_back();
 
 					++ loaded;
 					if( loaded == READS_PER_BATCH )
@@ -314,12 +314,12 @@ int main( int argc, const char *argv[] ) {
 					seq2 [ i ] = gz_buffer;
 					gzgets( gfp2, gz_buffer, MAX_SEQNAME_SIZE );	// this line is useless
 					gzgets( gfp2, gz_buffer, MAX_SEQNAME_SIZE );
-					qual2 [ i ] = gz_buffer;
+					qual2[ i ] = gz_buffer;
 
 					id2 [ i ].pop_back();
 					seq2[ i ].pop_back();
-					if( qual2[i].size() != id2[i].size() )
-					qual2 [ i ].pop_back();
+					if( qual2[i].size() != seq2[i].size() )
+						qual2[i].pop_back();
 				}
 			} else {
 				while( true ) {
@@ -344,7 +344,6 @@ int main( int argc, const char *argv[] ) {
 			}
 
 			// check whether read1 and read2 are of the same read length
-			// TODO: if the reads are longer than "cycle" paramater, only keep the head "cycle" ones
 			for( register unsigned int i=0; i!=loaded; ++i ) {
 				if( seq2[i].size() != seq1[i].size() ) {
 					if( seq2[i].size() > seq1[i].size() ) {
@@ -356,6 +355,7 @@ int main( int argc, const char *argv[] ) {
 					}
 				}
 
+				//if the reads are longer than "cycle" paramater, only keep the head "cycle" ones
 				if( seq1[i].size() > cycle ) {
 					seq1[i].resize(  cycle );
 					qual1[i].resize( cycle );
