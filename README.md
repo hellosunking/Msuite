@@ -179,7 +179,6 @@ user@linux$ Msuite -1 '/path/to/lane*.read1.fq' \
 ```
 Note that the single quotation mark is essential to protect the '\*' syntax from been extracted by your shell.
 
-<br />
 `Msuite` will check the data and dependent programs then generate a `makefile` under `/path/to/output/dir`
 ('-o' option). Then you can go to `/path/to/output/dir` and run `make` to perform the analysis:
 ```
@@ -235,7 +234,7 @@ The `pe_bam2bed.pl` and `se_bam2bed.pl` are designed to translate the aligned BA
 ## Citation
 When referencing, please cite "Sun K, Li L, Ma L, Zhao Y, Deng L, Wang H and Sun H:
 **Msuite: a high-performance and versatile DNA methylation data analysis toolkit.**
-*Patterns* 2020 Nov 13; 1(8):100127."
+*Patterns (N Y)* 2020 Nov 13; 1(8):100127."
 [Full Text](https://doi.org/10.1016/j.patter.2020.100127 "Full text")
 
 ---
