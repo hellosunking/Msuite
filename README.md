@@ -1,7 +1,7 @@
 ![Msuite logo](https://github.com/hellosunking/hellosunking.github.io/blob/master/logos/Msuite.png "Logo")
 
 # Msuite: Multi-mode DNA methylation data analysis suite
-Version 1.1.0, Aug 2020<br />
+Version 1.1.2, Jan 2021<br />
 Authors: Kun Sun, Lishi Li, Li Ma, Yu Zhao, Lin Deng, Huating Wang and Hao Sun<br />
 Software implemented by Kun Sun \(sunkun@szbl.ac.cn\)<br />
 <br />
@@ -74,6 +74,7 @@ Compulsory parameters:
                    If -U is used, then -2 will be ignored
 
                    If you have multiple files for your sample, please use ',' to separate them
+                   Currently, the maximum number of reads that Msuite could handle is 4,294,967,295.
 
   -x index         Specify the genome index
                    Please refer to README file on how to build index for Msuite
