@@ -142,7 +142,7 @@ int main( int argc, char *argv[] ) {
 			for( unsigned int ii=start; ii!=end; ++ii ) {
 				p = R1[ii].c_str();
                 register int i;
-				register int j = 0;
+				register unsigned int j = 0;
 				for( i=0; p[i]!=LINE_NUMBER_SEPARATOR; ++i ) {
 					j <<= 4;
 					if( p[i]<='9' ) {	//0-9
@@ -231,8 +231,6 @@ int main( int argc, char *argv[] ) {
 			char mateinfo[ MAX_ITERM_SIZE ];
 			register int len, bias;
 
-			register int i, j, k;
-
 			for( unsigned int ii=sindex; ii!=eindex; ++ii ) {
                 // deal read 1: should be on CRICK chain
                 ss.clear();
@@ -242,6 +240,7 @@ int main( int argc, char *argv[] ) {
                 ss >> seqName >> flag >> chr >> pos >> score;
 
                 // deal seqName
+				register int i, k;
                 register unsigned int j = 0;
                 for( i=0; seqName[i] != LINE_NUMBER_SEPARATOR; ++i ) {
                     j <<= 4;	// the number is in HEX
@@ -438,7 +437,6 @@ int main( int argc, char *argv[] ) {
 			char scoreSTR[ MAX_ITERM_SIZE ];
 			char mateinfo[ MAX_ITERM_SIZE ];
 			register int len, bias;
-            register int i, j, k;
 
             for( unsigned int ii=sindex; ii!=eindex; ++ii ) {
                 // deal read 1: should be on WATSON chain
@@ -447,7 +445,8 @@ int main( int argc, char *argv[] ) {
                 ss >> seqName >> flag >> chr >> pos >> score;
 
                 // deal seqName
-                j = 0;
+				register int i, k;
+                register unsigned int j = 0;
                 for( i=0; seqName[i] != LINE_NUMBER_SEPARATOR; ++i ) {
                     j <<= 4;	// the number is in HEX
                     if( seqName[i]<='9' ) {	//0-9; seqName > '0' is always true

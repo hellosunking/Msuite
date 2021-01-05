@@ -356,6 +356,7 @@ Compulsory parameters:
 
                    If you have multiple files for your sample, please use ',' to separate them,
                    or use '*' syntax similar to BASH (within a pair of single quotation marks)
+				   Currently, the maximum number of reads that Msuite could handle is 4,294,967,295.
 
   -x index         Specify the genome index
                    Please refer to README file on how to build index for Msuite

@@ -11,10 +11,10 @@ use Exporter 'import';
 our @EXPORT = qw($version $ver);
 
 # long version
-our $version = 'v1.1.0 (Aug 2020)';
+our $version = 'v1.1.1 (Jan 2021)';
 
 # short version
-our $ver = 'v1.1.0';
+our $ver = 'v1.1.1';
 
 1;
 
