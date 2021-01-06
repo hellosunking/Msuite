@@ -21,6 +21,14 @@ cols=c( "blue", "yellow", "green", "red", "black" );
 dat = read.table( infile, head=T );
 #cycle A C G T N
 
+## translate integer to number in case the fragment number is
+## too high which will cause integer overflow
+dat[,2] = as.numeric(dat[,2]);
+dat[,3] = as.numeric(dat[,3]);
+dat[,4] = as.numeric(dat[,4]);
+dat[,5] = as.numeric(dat[,5]);
+dat[,6] = as.numeric(dat[,6]);
+
 ## normalization
 for( i in 1:nrow(dat) ) {
 	all = dat[i,2] + dat[i,3] + dat[i,4] + dat[i,5] + dat[i,6];
